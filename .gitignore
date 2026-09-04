@@ -1,0 +1,41 @@
+# Runtime data and secrets
+data/
+auth.txt
+*.env
+.env*
+
+# Dependencies and local build caches
+node_modules/
+**/node_modules/
+.vite/
+
+# Temporary, backup and generated test files
+*.tmp
+*.bak
+*.bak-*
+*.backup
+*.check
+*.original
+*.part
+
+# Local OS/editor files
+.DS_Store
+.vscode/
+.idea/
+
+# Logs
+*.log
+npm-debug.log*
+
+# Keep the deployable frontend build; ignore other generated artifacts.
+
+# Video/media runtime files
+*.mp4
+*.mov
+*.mkv
+*.webm
+*.avi
+*.m4v
+*.mp3
+*.wav
+*.flac
