@@ -1,0 +1,8 @@
+import assert from 'node:assert/strict';
+const app = await (await import('node:fs/promises')).readFile(new URL('./src/App.jsx', import.meta.url), 'utf8');
+const api = await (await import('node:fs/promises')).readFile(new URL('../server-node/app/http-router.js', import.meta.url), 'utf8');
+const route = /router\.get\('\/upload\/chunk\/:uuid[\s\S]*?\{[\s\S]*?offset: file\.size[\s\S]*?\}\);/;
+assert.match(api, route, 'upload session recovery status endpoint is exposed');
+assert.match(app, /clipboard-upload-sessions/, 'upload sessions are persisted in browser storage');
+assert.match(app, /已恢复/, 'UI explains resumed upload');
+console.log('resume upload UI tests passed');

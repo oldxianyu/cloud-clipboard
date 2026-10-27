@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { serveFileRange } from './http-range.js';
 import KoaRouter from '@koa/router';
 import { koaBody } from 'koa-body';
 import koaWebsocket from 'koa-websocket';
@@ -45,6 +46,20 @@ const authMiddleware = async (ctx, next) => {
     await next();
 };
 
+const readTextBody = async (ctx, next) => {
+    let body = '';
+    for await (const chunk of ctx.req) {
+        body += chunk.toString('utf8');
+        if (config.text.limit > 0 && Buffer.byteLength(body, 'utf8') > config.text.limit) {
+            ctx.status = 413;
+            ctx.body = { code: 413, msg: '文本长度超过服务端限制', result: {} };
+            return;
+        }
+    }
+    ctx.request.body = body;
+    await next();
+};
+
 const router = new KoaRouter({
     prefix: config.server.prefix,
 });
@@ -59,17 +74,11 @@ router.get('/server', async ctx => {
 router.post(
     '/text',
     authMiddleware,
-    koaBody({
-        multipart: false,
-        urlencoded: false,
-        text: true,
-        json: false,
-        textLimit: 1048576,
-    }),
+    readTextBody,
     async ctx => {
         /** @type {String} */
         let body = ctx.request.body;
-        if (body.length > config.text.limit) {
+        if (config.text.limit > 0 && body.length > config.text.limit) {
             writeJSON(ctx, 400, {}, `文本长度不能超过 ${config.text.limit} 字`);
             return;
         }
@@ -154,6 +163,7 @@ router.post(
         formidable: {
             maxFields: 1,
             multiples: false,
+            maxFileSize: config.file.limit,
         },
     }),
     async ctx => {
@@ -217,9 +227,16 @@ router.post(
         uploadFileMap.set(file.uuid, file);
         writeJSON(ctx, 200, {
             uuid: file.uuid,
+            offset: file.size,
         });
     }
 );
+
+router.get('/upload/chunk/:uuid([0-9a-f]{32})', authMiddleware, async ctx => {
+    const file = uploadFileMap.get(ctx.params.uuid);
+    if (!file || !file.partial) return writeJSON(ctx, 404, {}, '无效的 UUID');
+    writeJSON(ctx, 200, { uuid: file.uuid, name: file.name, offset: file.size });
+});
 
 router.post('/upload/chunk/:uuid([0-9a-f]{32})', authMiddleware, async ctx => {
     try {
@@ -233,7 +250,9 @@ router.post('/upload/chunk/:uuid([0-9a-f]{32})', authMiddleware, async ctx => {
             ctx.req.on('error', error => reject(error));
             ctx.req.on('end', () => resolve(data));
         });
-        await file.write(data);
+        const rawOffset = ctx.get('Upload-Offset') || ctx.query.offset;
+        const offset = rawOffset === '' || rawOffset === undefined ? file.size : Number(rawOffset);
+        await file.write(data, offset);
         writeJSON(ctx);
     } catch (error) {
         writeJSON(ctx, 400, error.message || error);
@@ -243,7 +262,7 @@ router.post('/upload/chunk/:uuid([0-9a-f]{32})', authMiddleware, async ctx => {
 router.post('/upload/finish/:uuid([0-9a-f]{32})', authMiddleware, async ctx => {
     try {
         const file = uploadFileMap.get(ctx.params.uuid);
-        if (!file) {
+        if (!file || !file.partial) {
             throw new Error('无效的 UUID');
         }
         await file.finish();
@@ -280,43 +299,50 @@ router.post('/upload/finish/:uuid([0-9a-f]{32})', authMiddleware, async ctx => {
     }
 });
 
+router.get('/preview/archive/:uuid([0-9a-f]{32})/:filename', authMiddleware, async ctx => {
+    const file = uploadFileMap.get(ctx.params.uuid);
+    if (!file || file.partial || Date.now() / 1000 > file.expireTime) return ctx.status = 404;
+    const response = await fetch(`http://cloud-clipboard-preview:8000/archive/${file.uuid}/${encodeURIComponent(ctx.params.filename)}`);
+    ctx.status = response.status;
+    ctx.body = await response.json();
+});
+
+router.get('/preview/document/:uuid([0-9a-f]{32})/:filename', authMiddleware, async ctx => {
+    const file = uploadFileMap.get(ctx.params.uuid);
+    if (!file || file.partial || Date.now() / 1000 > file.expireTime) return ctx.status = 404;
+    const response = await fetch(`http://cloud-clipboard-preview:8000/document/${file.uuid}/${encodeURIComponent(ctx.params.filename)}`);
+    ctx.status = response.status;
+    if (!response.ok) return ctx.body = await response.text();
+    ctx.type = 'application/pdf';
+    ctx.body = Buffer.from(await response.arrayBuffer());
+});
+
+router.get('/preview/image/:uuid([0-9a-f]{32})/:filename', authMiddleware, async ctx => {
+    const file = uploadFileMap.get(ctx.params.uuid);
+    if (!file || file.partial || Date.now() / 1000 > file.expireTime) return ctx.status = 404;
+    const ext = path.extname(file.name).toLowerCase();
+    const mime = ({'.jpg':'image/jpeg','.jpeg':'image/jpeg','.png':'image/png','.gif':'image/gif','.webp':'image/webp','.svg':'image/svg+xml','.bmp':'image/bmp','.avif':'image/avif'})[ext];
+    if (!mime) return ctx.status = 415;
+    ctx.type = mime;
+    ctx.set('X-Content-Type-Options', 'nosniff');
+    ctx.set('Cache-Control', 'private, max-age=3600');
+    ctx.body = fs.createReadStream(file.path);
+});
+
 router.get(['/file/:uuid([0-9a-f]{32})', '/file/:uuid([0-9a-f]{32})/:filename'], async ctx => {
     const file = uploadFileMap.get(ctx.params.uuid);
     if (!file || Date.now() / 1000 > file.expireTime || !fs.existsSync(file.path)) {
         return ctx.status = 404;
     }
-    ctx.attachment(file.name, {type: 'inline'});
     const fileSize = (await fs.promises.stat(file.path)).size;
-    // https://github.com/xtx1130/koa-partial-content/blob/master/index.js
-    if (ctx.header.range && file.name.match(/\.(mp3|mp4|flv|webm|ogv|mpg|mpg|wav|ogg|opus|m4a|flac)$/gi)) {
-        try {
-            const m = /^bytes=(\d+)-(\d*)$/.exec(ctx.request.header.range || 'bytes=0-');
-            if (!m) throw new Error;
-            const rangeStart = parseInt(m[1]);
-            const rangeEnd = parseInt(m[2] || (fileSize - 1));
-            ctx.set('Accept-Range', 'bytes');
-            if (rangeEnd > fileSize - 1 || rangeEnd > fileSize - 1) {
-                throw new Error;
-            } else {
-                ctx.status = 206;
-                ctx.set('Content-Range', `bytes ${rangeStart}-${rangeEnd}/${fileSize}`);
-                await new Promise(resolve => {
-                    const rs = fs.createReadStream(file.path, {
-                        start: rangeStart,
-                        end: rangeEnd,
-                    });
-                    rs.on('open', () => rs.pipe(ctx.res));
-                    rs.on('end', resolve);
-                    rs.on('error', () => resolve(ctx.throw(500)));
-                });
-            }
-        } catch (err) {
-            ctx.throw(416);
-            ctx.set('Content-Range', `bytes */${fileSize}`);
-        }
-    } else {
-        ctx.body = fs.createReadStream(file.path);
-    }
+    const ext = path.extname(file.name).toLowerCase();
+    const media = /\.(mp4|webm|ogv|mov|m4v|mp3|wav|ogg|opus|m4a|flac|mpg|mpeg|avi|mkv)$/i.test(file.name);
+    if (media) ctx.type = ext;
+    ctx.set('Cache-Control', 'private, max-age=3600');
+    ctx.set('X-Content-Type-Options', 'nosniff');
+    ctx.attachment(file.name, {type: 'inline'});
+    ctx.respond = false;
+    await serveFileRange(ctx.req, ctx.res, file.path);
 });
 
 router.delete('/file/:uuid([0-9a-f]{32})', authMiddleware, async ctx => {

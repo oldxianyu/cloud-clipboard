@@ -1,0 +1,11 @@
+import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
+const app = await readFile(new URL('./src/App.jsx', import.meta.url), 'utf8');
+const pkg = JSON.parse(await readFile(new URL('./package.json', import.meta.url), 'utf8'));
+assert.ok(pkg.dependencies['@ant-design/x'], 'Ant Design X dependency is configured');
+assert.match(app, /<Sender/, 'chat composer is present');
+assert.match(app, /new WebSocket/, 'real-time sync is wired');
+assert.match(app, /roomRef\.current/, 'room is included in API operations');
+assert.match(app, /10 GiB/, 'upload size is shown in the composer');
+assert.match(app, /upload\/chunk/, 'chunked file upload exists');
+console.log('UI smoke tests passed');

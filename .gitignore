@@ -4,3 +4,10 @@ config.json
 cloud-clipboard.phar
 cloud-clipboard-gz.phar
 cloud-clipboard-bz2.phar
+/runtime/
+/compose.yaml.pre-deploy-backup
+/preview-worker/.pytest_cache/
+/preview-worker/__pycache__/
+/client/node_modules/
+/client/package-lock.json
+/server-node/static/

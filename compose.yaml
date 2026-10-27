@@ -1,0 +1,51 @@
+services:
+  cloud-clipboard:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: cloud-clipboard
+    restart: unless-stopped
+    expose:
+      - "9501"
+    mem_limit: 2g
+    volumes:
+      - ./runtime/config.json:/app/server-node/config.json:ro
+      - ./runtime/data:/app/server-node/data
+    networks:
+      - default
+      - cpamp_default
+    depends_on:
+      preview-worker:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:9501/').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  preview-worker:
+    build:
+      context: ./preview-worker
+    container_name: cloud-clipboard-preview
+    restart: unless-stopped
+    expose:
+      - "8000"
+    mem_limit: 4g
+    cpus: 2.0
+    volumes:
+      - ./runtime/data/uploads:/uploads:ro
+      - ./runtime/data/previews:/previews
+    networks:
+      - default
+      - cpamp_default
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+networks:
+  cpamp_default:
+    external: true
