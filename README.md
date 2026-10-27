@@ -3,10 +3,10 @@
 因为不想为了手机和电脑互传文件这种小事就扫🐴登录某个辣鸡 APP，而自己折腾出来的一个在线剪贴板。
 
 * 支持**传输纯文本**和**一键复制**
-* 支持**传输文件**（选择文件 / 拖拽 / <kbd>Ctrl+V</kbd> 粘贴截图），对于图像可以显示缩略图
+* 支持**传输文件**（选择文件 / 拖拽 / <kbd>Ctrl+V</kbd> 粘贴截图），支持图片缩略图及大文件分片断点续传（未完成上传记录保留 1 天）
+* 支持视频 Range 播放、图片预览、压缩包目录浏览，以及 Office 文档/PPT 转 PDF 预览
 * 使用 WebSocket 实现实时通知
-* 前端使用 [Vue 2](https://cn.vuejs.org) 和 [Vuetify](https://vuetifyjs.com/zh-Hans/) 构建
-* 后端使用 ~~[Swoole](https://www.swoole.com) 或~~ [Node.js](https://nodejs.org) ([Koa](https://github.com/koajs/koa)) 构建 ~~（两种服务端实现任选一种即可）~~
+* 本仓库当前运行版本：React、Ant Design X 前端与 Node.js/Koa 服务端；Office 转换由独立 LibreOffice worker 处理
 * 除网页以外，也可以[通过 HTTP API 使用](#http-api)
 
 > [!TIP]
@@ -115,6 +115,13 @@ node main.js
 * 在命令行中指定：`node main.js /path/to/config.json`
 
 服务端默认会监听本机所有网卡的 IP 地址（也可以自己设定），并在终端中显示前端界面所在的网址，使用浏览器打开即可使用。
+
+> [!NOTE]
+> 当前增强功能（断点续传、文件预览及 Office 转 PDF）由本仓库的 React 前端、Node.js 服务端和独立预览 worker 提供，不适用于旧版 Docker Hub 镜像。
+>
+> 使用 Compose 部署时，请先配置 `runtime/config.json` 并准备 Compose 中声明的外部 Docker 网络；`runtime/` 包含运行配置和用户数据，不应提交到版本库。预览 worker 需要额外的 CPU 和内存资源。
+>
+> 断点续传依赖浏览器保存的上传会话信息；在同一浏览器重新选择同一文件即可尝试恢复。已完成分片可保留到 24 小时清理周期到期。分块机制不能突破 Cloudflare 等代理对单次请求大小的限制。
 
 ### Python 版服务端
 
