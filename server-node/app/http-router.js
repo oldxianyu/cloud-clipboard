@@ -225,10 +225,11 @@ router.post(
         const filename = ctx.request.body;
         const file = new UploadedFile(filename);
         uploadFileMap.set(file.uuid, file);
-        writeJSON(ctx, 200, {
-            uuid: file.uuid,
-            offset: file.size,
-        });
+        ctx.body = {
+            code: 200,
+            msg: '',
+            result: { uuid: file.uuid, offset: file.size },
+        };
     }
 );
 
@@ -279,7 +280,7 @@ router.post('/upload/finish/:uuid([0-9a-f]{32})', authMiddleware, async ctx => {
                 expire: file.expireTime,
             },
         };
-        if (file.size <= 33554432) {
+        if (file.size <= 33554432 && !/\.(mp4|webm|ogv|mov|m4v|mp3|wav|ogg|opus|m4a|flac|mpg|mpeg|avi|mkv)$/i.test(file.name)) {
             try {
                 message.data.thumbnail = await createThumbnail(file.path);
             } catch {}

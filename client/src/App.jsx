@@ -26,6 +26,7 @@ export default function ClipboardApp({ dark, onToggleTheme }) {
   const wsRef = React.useRef(null);
   const bottomRef = React.useRef(null);
   const fileRef = React.useRef(null);
+  const uploadingFingerprints = React.useRef(new Set());
   const roomRef = React.useRef(room);
   roomRef.current = room;
 
@@ -70,6 +71,12 @@ export default function ClipboardApp({ dark, onToggleTheme }) {
   const uploadFiles = async fileList => {
     const files = Array.from(fileList || []); if (!files.length) return;
     if (files.some(f=>f.size>MAX_FILE)) { messageApi.error('单个文件不能超过 10 GiB'); return; }
+    const fingerprints = files.map(file => `${file.name}:${file.size}:${file.lastModified}`);
+    if (fingerprints.some(fingerprint => uploadingFingerprints.current.has(fingerprint))) {
+      messageApi.error('相同文件正在上传，请勿重复提交');
+      return;
+    }
+    fingerprints.forEach(fingerprint => uploadingFingerprints.current.add(fingerprint));
     setBusy(true); setProgress(0);
     try {
       for (const file of files) {
@@ -81,6 +88,7 @@ export default function ClipboardApp({ dark, onToggleTheme }) {
           if (statusResponse.ok) offset = (await statusResponse.json()).result.offset || 0;
           else { uuid = null; delete sessions[fingerprint]; }
         }
+        // Trust the file fingerprint + server offset, not MIME/extension: video is uploaded as ordinary chunks, preview only after finish.
         if (!uuid) {
           const init=await fetch(`/upload/chunk?room=${encodeURIComponent(roomRef.current)}`, {method:'POST',headers:{'Content-Type':'text/plain'},body:file.name}).then(r=>r.json());
           uuid = init.result.uuid; sessions[fingerprint] = uuid; localStorage.setItem('clipboard-upload-sessions', JSON.stringify(sessions));
@@ -97,13 +105,16 @@ export default function ClipboardApp({ dark, onToggleTheme }) {
         delete sessions[fingerprint]; localStorage.setItem('clipboard-upload-sessions', JSON.stringify(sessions));
       }
     } catch(e) { messageApi.error(`上传失败：${e.message}`); }
-    finally { setBusy(false); setProgress(0); setResumeInfo(null); if(fileRef.current) fileRef.current.value=''; }
+    finally {
+      fingerprints.forEach(fingerprint => uploadingFingerprints.current.delete(fingerprint));
+      setBusy(false); setProgress(0); setResumeInfo(null); if(fileRef.current) fileRef.current.value='';
+    }
   };
 
   const clearHistory = () => Modal.confirm({ title:'清空当前房间？', content:'该房间内的剪贴板消息将被移除。', okText:'清空', cancelText:'取消', okButtonProps:{danger:true}, onOk:()=>api('revoke/all',{method:'DELETE'}) });
   const joinRoom = () => { const next=roomDraft.trim(); setRoom(next); location.hash = next ? `/?room=${encodeURIComponent(next)}` : '/'; setRoomModal(false); };
   const onPaste = e => { const files=Array.from(e.clipboardData?.files||[]); if(files.length) {e.preventDefault(); uploadFiles(files);} };
-  const onDrop = e => { e.preventDefault(); uploadFiles(e.dataTransfer.files); };
+  const onDrop = e => { e.preventDefault(); e.stopPropagation(); uploadFiles(e.dataTransfer.files); };
   const onDrag = e => e.preventDefault();
   const openPreview = async item => {
     setPreview(item); setArchiveEntries(null);

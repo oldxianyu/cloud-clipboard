@@ -5,4 +5,6 @@ const route = /router\.get\('\/upload\/chunk\/:uuid[\s\S]*?\{[\s\S]*?offset: fil
 assert.match(api, route, 'upload session recovery status endpoint is exposed');
 assert.match(app, /clipboard-upload-sessions/, 'upload sessions are persisted in browser storage');
 assert.match(app, /已恢复/, 'UI explains resumed upload');
+assert.match(app, /uploadingFingerprints/, 'same file fingerprint cannot be uploaded twice concurrently');
+assert.match(app, /stopPropagation\(\)/, 'drop event is handled once instead of bubbling to nested drop zones');
 console.log('resume upload UI tests passed');
